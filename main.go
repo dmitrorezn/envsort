@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"sort"
 	"strings"
 
+	"github.com/kr/pretty"
 	"gopkg.in/yaml.v3"
 )
 
@@ -21,46 +24,73 @@ type Loader interface {
 	Load(a any) error
 }
 
-func parseLoader(name, encoding string) (l Loader, err error) {
-	var b []byte
-	b, err = os.ReadFile(name)
+func parseFile(name, encoding string) (l Loader, err error) {
+	f, err := os.Open(name)
 	if err != nil {
 		return nil, err
 	}
-	switch encoding {
-	case "json":
-		return loader(func(a any) error {
-			return json.Unmarshal(b, a)
-		}), nil
-	}
+	l = parseLoader(f, encoding)
 
-	return loader(func(a any) error {
-		return yaml.Unmarshal(b, a)
-	}), nil
+	return l, nil
 }
 
-func main() {
-	if len(os.Args) < 2 {
-		log.Fatalln("provide file name")
+func parseLoader(r io.ReadCloser, encoding string) loader {
+	switch encoding {
+	case "json":
+		return json.NewDecoder(r).Decode
 	}
 
-	var (
-		fileName = os.Args[1]
-	)
+	return yaml.NewDecoder(r).Decode
+}
+
+func load(fileName string) map[string]string {
 	_, encoding, ok := strings.Cut(fileName, ".")
 	if !ok {
 		log.Fatalln("provide full file name")
 	}
-
-	l, err := parseLoader(fileName, encoding)
+	l, err := parseFile(fileName, encoding)
 	if err != nil {
 		log.Fatalln("parseLoader", err)
 	}
-
 	values := map[string]string{}
 	if err = l.Load(&values); err != nil {
-		log.Fatalf("Load %s %T\n", err, encoding, l)
+		log.Fatalf("Load %s %s %T\n", err, encoding, l)
 	}
+
+	return values
+}
+
+func main() {
+
+	if len(os.Args) < 3 {
+		log.Fatalln("provide file name")
+	}
+
+	var (
+		cmd      = os.Args[1]
+		fileName = os.Args[2]
+	)
+	switch cmd {
+	case "diff":
+		f1, f2, ok := strings.Cut(fileName, ",")
+		if !ok {
+			return
+		}
+		b1 := sortValues(f1)
+		b2 := sortValues(f2)
+		fmt.Println("DIFF:")
+		for _, v := range pretty.Diff(b1, b2) {
+			fmt.Println(v)
+		}
+		return
+	default:
+		sortValues(fileName)
+	}
+}
+
+func sortValues(fileName string) map[string]string {
+	values := load(fileName)
+
 	keys := make([]string, 0, len(values))
 	for k := range values {
 		keys = append(keys, k)
@@ -69,6 +99,7 @@ func main() {
 	sort.Slice(keys, func(i, j int) bool {
 		vals1 := strings.Split(keys[i], "_")
 		vals2 := strings.Split(keys[j], "_")
+
 		if len(vals1) == 0 || len(vals2) == 0 {
 			return keys[i] < keys[j]
 		}
@@ -80,14 +111,15 @@ func main() {
 
 		return keys[i] < keys[j]
 	})
-
-	f, err := os.Open(fileName)
+	file, err := os.Create("tmp_" + fileName)
 	if err != nil {
 		log.Fatalln("Create", err)
 	}
-	defer f.Close()
+	defer file.Close()
+	f := bufio.NewWriter(file)
+
 	for i, k := range keys {
-		_, err = fmt.Fprintf(f, "	%s: \"%s\"\n", k, values[k])
+		_, err = fmt.Fprintf(f, "%s: \"%s\"\n", k, values[k])
 		if err != nil {
 			log.Fatalln("Fprintf", err)
 		}
@@ -101,4 +133,6 @@ func main() {
 			}
 		}
 	}
+
+	return values
 }
