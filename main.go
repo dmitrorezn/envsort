@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,12 +30,43 @@ func parseFile(name, encoding string) (l Loader, err error) {
 	if err != nil {
 		return nil, err
 	}
-	l = parseLoader(f, encoding)
+	buf := bytes.NewBuffer(nil)
+	s := bufio.NewScanner(bufio.NewReader(f))
+	s.Split(bufio.ScanLines)
+	i := 1
+	for s.Scan() {
+		t := strings.TrimLeft(s.Text(), " ")
+		if strings.Replace(t, "\n", "", 1) == "" {
+			continue
+		}
+		if strings.HasPrefix(t, "#") || strings.HasPrefix(t, "//") {
+			continue
+		}
+		t = strings.ReplaceAll(t, " :", ":")
+		t = strings.ReplaceAll(t, " =", ":")
+		t = strings.ReplaceAll(t, "  ", " ")
+		t = strings.ReplaceAll(t, "=\"", ": \"")
+		t = strings.ReplaceAll(t, "= ", ": ")
+		t = strings.ReplaceAll(t, "=", ": ")
 
-	return l, nil
+		b, _, ok := strings.Cut(t, "#")
+		if !ok {
+			b, _, ok = strings.Cut(t, "// ")
+		}
+		if ok {
+			t = b
+		}
+
+		buf.WriteString(t)
+		buf.WriteString("\n")
+		//fmt.Println("i", i, t)
+		i++
+	}
+
+	return parseLoader(buf, encoding), f.Close()
 }
 
-func parseLoader(r io.ReadCloser, encoding string) loader {
+func parseLoader(r io.Reader, encoding string) loader {
 	switch encoding {
 	case "json":
 		return json.NewDecoder(r).Decode
@@ -53,6 +85,7 @@ func load(fileName string) map[string]string {
 		log.Fatalln("parseLoader", err)
 	}
 	values := map[string]string{}
+
 	if err = l.Load(&values); err != nil {
 		log.Fatalf("Load %s %s %T\n", err, encoding, l)
 	}
@@ -62,16 +95,21 @@ func load(fileName string) map[string]string {
 
 func main() {
 
-	if len(os.Args) < 3 {
-		log.Fatalln("provide file name")
+	if len(os.Args) < 2 {
+		return
 	}
-
-	var (
-		cmd      = os.Args[1]
+	cmd := os.Args[1]
+	fileName := ""
+	if len(os.Args) >= 3 {
 		fileName = os.Args[2]
-	)
+	} else if cmd != "help" {
+		fileName = os.Args[2]
+	}
+	fmt.Println(fileName)
 	switch cmd {
-	case "diff":
+	case "help", "h", "-h":
+		fmt.Println("usage:\n ./envsort [sort|diff] [file1],[file2]")
+	case "diff", "-d":
 		f1, f2, ok := strings.Cut(fileName, ",")
 		if !ok {
 			return
@@ -80,10 +118,12 @@ func main() {
 		b2 := sortValues(f2)
 		fmt.Println("DIFF:")
 		for _, v := range pretty.Diff(b1, b2) {
+			fmt.Println(fileName)
 			fmt.Println(v)
 		}
 		return
-	default:
+	case "sort", "s", "-s":
+
 		sortValues(fileName)
 	}
 }
