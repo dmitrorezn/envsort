@@ -116,9 +116,9 @@ func main() {
 		}
 		b1 := sortValues(f1)
 		b2 := sortValues(f2)
-		fmt.Println("DIFF:")
-		for _, v := range pretty.Diff(b1, b2) {
-			fmt.Println(fileName)
+		diff := pretty.Diff(b1, b2)
+		sort.Sort(SortedDiffs(diff[2:]))
+		for _, v := range diff {
 			fmt.Println(v)
 		}
 		return
@@ -128,6 +128,62 @@ func main() {
 	}
 }
 
+type SortedEnvs []string
+
+func (keys SortedEnvs) Len() int {
+	return len(keys)
+}
+
+func (keys SortedEnvs) Less(i, j int) bool {
+	vals1 := strings.Split(keys[i], "_")
+	vals2 := strings.Split(keys[j], "_")
+
+	if len(vals1) == 0 || len(vals2) == 0 {
+		return keys[i] < keys[j]
+	}
+	for i := 0; i < min(len(vals2), len(vals1)); i++ {
+		if vals1[i] != vals2[i] {
+			return vals1[i] < vals2[i]
+		}
+	}
+
+	return keys[i] < keys[j]
+}
+
+func (s SortedEnvs) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+type SortedDiffs []string
+
+func (keys SortedDiffs) Len() int {
+	return len(keys)
+}
+
+func (keys SortedDiffs) Less(i, j int) bool {
+	idxi := strings.Index(keys[i], `"`)
+	idxj := strings.Index(keys[j], `"`)
+	vals1 := strings.Split(keys[i][idxi:], "_")
+	vals2 := strings.Split(keys[j][idxj:], "_")
+
+	if len(vals1) == 0 || len(vals2) == 0 {
+		return keys[i] < keys[j]
+	}
+	for i := 0; i < min(len(vals2), len(vals1)); i++ {
+		if vals1[i] != vals2[i] {
+			return vals1[i] < vals2[i]
+		}
+	}
+
+	return keys[i] < keys[j]
+}
+
+func (s SortedDiffs) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+var _ sort.Interface = new(SortedEnvs)
+
 func sortValues(fileName string) map[string]string {
 	values := load(fileName)
 
@@ -135,22 +191,8 @@ func sortValues(fileName string) map[string]string {
 	for k := range values {
 		keys = append(keys, k)
 	}
+	sort.Sort(SortedEnvs(keys))
 
-	sort.Slice(keys, func(i, j int) bool {
-		vals1 := strings.Split(keys[i], "_")
-		vals2 := strings.Split(keys[j], "_")
-
-		if len(vals1) == 0 || len(vals2) == 0 {
-			return keys[i] < keys[j]
-		}
-		for i := 0; i < min(len(vals2), len(vals1)); i++ {
-			if vals1[i] != vals2[i] {
-				return vals1[i] < vals2[i]
-			}
-		}
-
-		return keys[i] < keys[j]
-	})
 	file, err := os.Create("tmp_" + fileName)
 	if err != nil {
 		log.Fatalln("Create", err)
